@@ -10,4 +10,5 @@ export interface FileMetadata {
   fileSize: number;
   totalChunks: number;
   uploadDate: string;
+  savedBytes?: number;
 }

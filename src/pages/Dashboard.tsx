@@ -2,15 +2,30 @@ import { useState, useRef, useEffect } from 'react';
 import api from '../services/api';
 import type { FileMetadata } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UploadCloud, File as FileIcon, Download, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { UploadCloud, File as FileIcon, Download, Loader2, AlertCircle, CheckCircle2, Share2, Key, Copy, X, Clock, Eye, EyeOff, Trash2, Pause, Play } from 'lucide-react';
 
 export const Dashboard = () => {
   const [files, setFiles] = useState<FileMetadata[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'paused' | 'error'>('idle');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadSessionId, setUploadSessionId] = useState<string | null>(null);
+  const uploadStatusRef = useRef(uploadStatus);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // File Sharing State
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareFileId, setShareFileId] = useState<number | null>(null);
+  const [sharePassword, setSharePassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [shareTtlMinutes, setShareTtlMinutes] = useState(10);
+  const [shareLink, setShareLink] = useState('');
+  const [sharing, setSharing] = useState(false);
+
+  useEffect(() => {
+    uploadStatusRef.current = uploadStatus;
+  }, [uploadStatus]);
 
   const fetchFiles = async () => {
     try {
@@ -42,47 +57,96 @@ export const Dashboard = () => {
     }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile) return;
+  const CHUNK_SIZE = 2 * 1024 * 1024; // 2MB
+  const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
-    setUploading(true);
-    setUploadProgress(0);
+  const startOrResumeUpload = async (sessionId?: string) => {
+    if (!selectedFile) return;
+    setUploadStatus('uploading');
     setMessage(null);
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+    let currentSessionId = sessionId || uploadSessionId;
+    let missingChunks: number[] = [];
+    let tChunks = 0;
+    let uploadedCount = 0;
 
     try {
-      // Simulate progress for UI (real progress requires onUploadProgress)
-      const interval = setInterval(() => {
-        setUploadProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(interval);
-            return 90;
-          }
-          return prev + 10;
+      if (!currentSessionId) {
+        // Init new upload
+        const initRes = await api.post('/files/upload/init', {
+          filename: selectedFile.name,
+          contentType: selectedFile.type || 'application/octet-stream',
+          totalSize: selectedFile.size,
         });
-      }, 200);
+        currentSessionId = initRes.data.sessionId;
+        tChunks = initRes.data.totalChunks;
+        setUploadSessionId(currentSessionId);
+        missingChunks = Array.from({ length: tChunks }, (_, i) => i);
+      } else {
+        // Resume existing
+        const statusRes = await api.get(`/files/upload/${currentSessionId}/status`);
+        tChunks = statusRes.data.totalChunks;
+        const uploaded = statusRes.data.uploadedChunks as number[];
+        missingChunks = Array.from({ length: tChunks }, (_, i) => i).filter(i => !uploaded.includes(i));
+        uploadedCount = uploaded.length;
+        setUploadProgress(Math.round((uploadedCount / tChunks) * 100));
+      }
 
-      const response = await api.post('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      // Upload missing chunks sequentially
+      for (const i of missingChunks) {
+        if (uploadStatusRef.current === 'paused') {
+          return; // Stop processing and keep session ID
+        }
 
-      clearInterval(interval);
-      setUploadProgress(100);
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, selectedFile.size);
+        const chunk = selectedFile.slice(start, end);
 
-      setMessage({ type: 'success', text: response.data });
+        const formData = new FormData();
+        formData.append('chunk', chunk);
 
-      setSelectedFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+        let success = false;
+        let retries = 0;
+        const backoff = [1000, 2000, 4000];
 
-      await fetchFiles();
+        while (!success && retries <= 3) {
+          try {
+            await api.put(`/files/upload/chunk?sessionId=${currentSessionId}&chunkIndex=${i}`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            success = true;
+          } catch (err) {
+            if (retries === 3) throw err; // Max retries reached
+            await delay(backoff[retries]);
+            retries++;
+          }
+        }
+
+        uploadedCount++;
+        setUploadProgress(Math.round((uploadedCount / tChunks) * 100));
+      }
+
+      // Finalize
+      if (uploadStatusRef.current === 'uploading') {
+        await api.post(`/files/upload/${currentSessionId}/commit`);
+        setUploadStatus('idle');
+        setUploadSessionId(null);
+        setUploadProgress(100);
+        setMessage({ type: 'success', text: 'File uploaded successfully' });
+        setSelectedFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        await fetchFiles();
+      }
 
     } catch (err: any) {
-      setMessage({ type: 'error', text: err.response?.data || 'Upload failed' });
-    } finally {
-      setTimeout(() => setUploading(false), 500);
+      setUploadStatus('error');
+      setMessage({ type: 'error', text: err.response?.data || 'Upload failed. Network error.' });
     }
+  };
+
+  const handlePause = () => setUploadStatus('paused');
+  const handleResume = () => {
+    if (uploadSessionId) startOrResumeUpload(uploadSessionId);
   };
 
   const handleDownload = async (id: number, fileName: string) => {
@@ -102,6 +166,42 @@ export const Dashboard = () => {
     } catch (err) {
       setMessage({ type: 'error', text: 'Download failed' });
     }
+  };
+
+  const handleShare = async () => {
+    if (!shareFileId) return;
+    setSharing(true);
+    try {
+      const res = await api.post('/share/create', { 
+        fileId: shareFileId,
+        ttlMinutes: shareTtlMinutes,
+        password: sharePassword || undefined
+      });
+      setShareLink(res.data.shareUrl);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data || 'Failed to generate share link' });
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const handleRevokeShare = async () => {
+    if (!shareLink) return;
+    try {
+      const token = shareLink.split('/').pop();
+      if (!token) throw new Error("Invalid token");
+      await api.delete(`/share/${token}`);
+      setMessage({ type: 'success', text: 'Share link revoked successfully.' });
+      setShareLink('');
+      setShareModalOpen(false);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.response?.data || 'Failed to revoke link' });
+    }
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(shareLink);
+    setMessage({ type: 'success', text: 'Link copied to clipboard!' });
   };
 
   const formatSize = (bytes: number) => {
@@ -133,6 +233,11 @@ export const Dashboard = () => {
     }
   };
 
+  const totalUsedBytes = files.reduce((acc, f) => acc + f.fileSize, 0);
+  const totalSavedBytes = files.reduce((acc, f) => acc + (f.savedBytes || 0), 0);
+  const totalStorage = totalUsedBytes + totalSavedBytes;
+  const savingsPercentage = totalStorage > 0 ? Math.round((totalSavedBytes / totalStorage) * 100) : 0;
+
   return (
     <div className="space-y-8">
       {/* Upload Section */}
@@ -150,14 +255,14 @@ export const Dashboard = () => {
                 ? 'border-indigo-500/50 bg-indigo-500/5'
                 : 'border-[rgba(255,255,255,0.2)] hover:border-indigo-400/50 hover:bg-[rgba(255,255,255,0.02)]'
             }`}
-            onClick={() => !uploading && fileInputRef.current?.click()}
+            onClick={() => uploadStatus !== 'uploading' && fileInputRef.current?.click()}
           >
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileSelect}
               className="hidden"
-              disabled={uploading}
+              disabled={uploadStatus === 'uploading'}
             />
 
             <AnimatePresence mode="wait">
@@ -196,26 +301,45 @@ export const Dashboard = () => {
           </div>
 
           <div className="w-full md:w-64 flex flex-col gap-4">
-            <button
-              onClick={handleUpload}
-              disabled={!selectedFile || uploading}
-              className="btn-primary w-full flex items-center justify-center gap-2 h-14 text-lg"
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="animate-spin" /> Uploading...
-                </>
-              ) : (
-                <>
-                  <UploadCloud /> Upload to Vault
-                </>
-              )}
-            </button>
+            {uploadStatus === 'idle' || uploadStatus === 'error' ? (
+              <button
+                onClick={() => startOrResumeUpload()}
+                disabled={!selectedFile}
+                className="btn-primary w-full flex items-center justify-center gap-2 h-14 text-lg"
+              >
+                <UploadCloud /> Upload to Vault
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                {uploadStatus === 'paused' ? (
+                  <button
+                    onClick={handleResume}
+                    className="btn-primary flex-1 flex items-center justify-center gap-2 h-14 text-lg bg-emerald-500 hover:bg-emerald-600 border-emerald-500/50"
+                  >
+                    <Play fill="currentColor" size={20} /> Resume
+                  </button>
+                ) : (
+                  <button
+                    onClick={handlePause}
+                    className="btn-primary flex-1 flex items-center justify-center gap-2 h-14 text-lg bg-amber-500 hover:bg-amber-600 border-amber-500/50"
+                  >
+                    <Pause fill="currentColor" size={20} /> Pause
+                  </button>
+                )}
+              </div>
+            )}
 
-            {uploading && (
-              <div className="w-full bg-[rgba(255,255,255,0.1)] rounded-full h-2 mt-2 overflow-hidden">
+            {(uploadStatus === 'uploading' || uploadStatus === 'paused' || uploadProgress > 0) && (
+              <div 
+                className="w-full bg-[rgba(255,255,255,0.1)] rounded-full h-2 mt-2 overflow-hidden"
+                role="progressbar"
+                aria-valuenow={uploadProgress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Upload progress"
+              >
                 <motion.div
-                  className="bg-indigo-500 h-2 rounded-full"
+                  className={`h-2 rounded-full ${uploadStatus === 'paused' ? 'bg-amber-500' : uploadStatus === 'error' ? 'bg-red-500' : 'bg-indigo-500'}`}
                   initial={{ width: 0 }}
                   animate={{ width: `${uploadProgress}%` }}
                   transition={{ duration: 0.2 }}
@@ -239,6 +363,40 @@ export const Dashboard = () => {
             {message.text}
           </motion.div>
         )}
+      </section>
+
+      {/* Deduplication Storage Stats */}
+      <section className="glass-card p-6 flex flex-col md:flex-row items-center justify-between gap-6">
+        <div>
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <CheckCircle2 className="text-emerald-400" size={20} /> Storage Optimization
+          </h3>
+          <p className="text-sm text-gray-400 mt-1">Smart deduplication saves space by storing identical chunks only once.</p>
+        </div>
+        
+        <div className="flex-1 w-full max-w-md">
+          <div className="flex justify-between text-sm mb-2">
+            <span className="text-gray-300">Used: {formatSize(totalUsedBytes)}</span>
+            <span className="text-emerald-400 font-medium">Saved: {formatSize(totalSavedBytes)}</span>
+          </div>
+          <div className="w-full bg-[rgba(255,255,255,0.05)] rounded-full h-3 overflow-hidden flex border border-[rgba(255,255,255,0.1)]">
+            <motion.div 
+              className="bg-indigo-500 h-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${totalStorage > 0 ? (totalUsedBytes / totalStorage) * 100 : 0}%` }}
+              transition={{ duration: 1 }}
+            />
+            <motion.div 
+              className="bg-emerald-500 h-full"
+              initial={{ width: 0 }}
+              animate={{ width: `${savingsPercentage}%` }}
+              transition={{ duration: 1 }}
+            />
+          </div>
+          <p className="text-xs text-right mt-2 text-gray-500">
+            You saved <span className="text-emerald-400 font-medium">{savingsPercentage}%</span> of storage
+          </p>
+        </div>
       </section>
 
       {/* Files List Section */}
@@ -287,13 +445,27 @@ export const Dashboard = () => {
                       {formatDate(file.uploadDate)}
                     </td>
                     <td className="py-4 text-right pr-4">
-                      <button
-                        onClick={() => handleDownload(file.id, file.fileName)}
-                        className="p-2 bg-[rgba(255,255,255,0.05)] hover:bg-indigo-500/20 hover:text-indigo-400 rounded-lg transition-colors inline-flex text-gray-400"
-                        title="Download and Decrypt"
-                      >
-                        <Download size={18} />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => {
+                            setShareFileId(file.id);
+                            setSharePassword('');
+                            setShareLink('');
+                            setShareModalOpen(true);
+                          }}
+                          className="p-2 bg-[rgba(255,255,255,0.05)] hover:bg-emerald-500/20 hover:text-emerald-400 rounded-lg transition-colors inline-flex text-gray-400"
+                          title="Share File"
+                        >
+                          <Share2 size={18} />
+                        </button>
+                        <button
+                          onClick={() => handleDownload(file.id, file.fileName)}
+                          className="p-2 bg-[rgba(255,255,255,0.05)] hover:bg-indigo-500/20 hover:text-indigo-400 rounded-lg transition-colors inline-flex text-gray-400"
+                          title="Download and Decrypt"
+                        >
+                          <Download size={18} />
+                        </button>
+                      </div>
                     </td>
                   </motion.tr>
                 ))}
@@ -302,6 +474,118 @@ export const Dashboard = () => {
           </div>
         )}
       </section>
+
+      {/* Share Modal */}
+      <AnimatePresence>
+        {shareModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="share-modal-title"
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="glass-card w-full max-w-md p-6 relative overflow-hidden"
+            >
+              <button 
+                onClick={() => setShareModalOpen(false)}
+                className="absolute top-4 right-4 text-gray-400 hover:text-white"
+                aria-label="Close share modal"
+              >
+                <X size={20} />
+              </button>
+
+              <h3 id="share-modal-title" className="text-xl font-bold mb-2 flex items-center gap-2">
+                <Share2 className="text-emerald-400" /> Share File
+              </h3>
+              <p className="text-sm text-gray-400 mb-6">Generate a secure, expiring link for public download.</p>
+
+              {!shareLink ? (
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="share-ttl" className="text-sm font-medium text-gray-300 ml-1">Link Expiration</label>
+                    <div className="relative mt-1">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Clock size={16} className="text-gray-500" />
+                      </div>
+                      <select
+                        id="share-ttl"
+                        value={shareTtlMinutes}
+                        onChange={(e) => setShareTtlMinutes(Number(e.target.value))}
+                        className="glass-input w-full pl-10 py-2 text-sm appearance-none bg-[#1a1d2d]"
+                      >
+                        <option value={10}>10 Minutes</option>
+                        <option value={60}>1 Hour</option>
+                        <option value={1440}>24 Hours</option>
+                        <option value={10080}>7 Days</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="share-password" className="text-sm font-medium text-gray-300 ml-1">Optional Password</label>
+                    <div className="relative mt-1">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Key size={16} className="text-gray-500" />
+                      </div>
+                      <input
+                        id="share-password"
+                        type={showPassword ? 'text' : 'password'}
+                        value={sharePassword}
+                        onChange={(e) => setSharePassword(e.target.value)}
+                        className="glass-input w-full pl-10 pr-10 py-2 text-sm"
+                        placeholder="Leave blank for public link"
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-gray-300"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <button
+                    onClick={handleShare}
+                    disabled={sharing}
+                    className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2 mt-4"
+                  >
+                    {sharing ? <Loader2 size={18} className="animate-spin" /> : 'Generate Secure Link'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-3 bg-[rgba(255,255,255,0.05)] border border-[rgba(255,255,255,0.1)] rounded-lg text-sm text-gray-300 break-all select-all">
+                    {shareLink}
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={copyToClipboard}
+                      className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Copy size={18} /> Copy Link
+                    </button>
+                    <button
+                      onClick={handleRevokeShare}
+                      className="flex-1 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Trash2 size={18} /> Revoke
+                    </button>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
