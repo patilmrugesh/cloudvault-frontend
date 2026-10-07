@@ -1,75 +1,129 @@
-# React + TypeScript + Vite
+# CloudVault Frontend — Modern Secure Cloud Storage & AI Document Assistant
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A responsive, high-performance web client for **CloudVault** built with **React 19**, **TypeScript**, and **Vite**. Features end-to-end encrypted chunked uploads, real-time file transfer monitoring, and a fully featured **Document AI & RAG Assistant** with token streaming and conversational history.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🌟 Key Features
 
-## React Compiler
+### 1. 🤖 Document AI & RAG Intelligence
+- **Real-Time Token Streaming**: Server-Sent Events (SSE) stream parser that renders AI responses token-by-token with zero lag.
+- **Rich Markdown Formatting**: Complete Markdown styling with code blocks, bullet points, bold emphasis, and tables via `react-markdown` and `remark-gfm`.
+- **Three Dedicated Intelligence Modes**:
+  - 📋 **Executive Summary**: Synthesizes long documents into concise overviews.
+  - 📝 **Detailed Study Notes**: Structured, formatted breakdown with key takeaways and definitions.
+  - 💬 **Interactive Q&A**: Asks any natural-language question grounded directly in the file's indexed chunks.
+- **Conversation & Interaction History**:
+  - Dedicated **History Tab** inside the AI modal.
+  - Displays chronological list of previous prompts, summaries, and responses.
+  - One-click copy to clipboard for any AI output.
+  - Seamless switching between active prompts and prior interactions.
 
-The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
+### 2. ⚡ Resilient File Management & Upload Pipeline
+- **Parallel Chunked Transfers**: Breaks large files into chunks and uploads them with real-time percentage indicators.
+- **Chunk Deduplication Feedback**: Immediate visual cues when uploaded chunks match existing hashes.
+- **Secure File Sharing**: Modal for creating signed, expiration-controlled share links.
+- **Search & Sort**: Filter files by name, file size, or date modified in ascending or descending order.
 
-Note: This will impact Vite dev & build performances.
+### 3. 🎨 Modern Design System & Component Suite
+- **Tailored Component Architecture**: Custom reusable components including `Button`, `IconButton`, `Modal`, `Badge`, `Checkbox`, `Skeleton`, `ConfirmDialog`, `Input`, and `EmptyState`.
+- **Toast Notification System**: Global decoupled context for animated success, error, info, and warning notifications.
+- **Modern Dark UI Aesthetics**: Clean dark palette, high contrast, smooth transitions, and iconography via `lucide-react`.
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🛠️ Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+| Technology | Purpose |
+|---|---|
+| **React 19** | Modern reactive user interface library |
+| **TypeScript** | Type safety and developer experience |
+| **Vite** | Fast HMR dev server and optimized production bundler |
+| **Lucide React** | Modern, consistent icon library |
+| **React Markdown & Remark GFM** | Streaming markdown parsing and rendering |
+| **Axios & Fetch API** | REST API calls & SSE streaming reader |
+| **Docker & Docker Compose** | Multi-stage containerized deployment |
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## 📁 Directory Structure
+
+```text
+src/
+├── components/
+│   ├── ui/                    # Reusable design system primitives
+│   │   ├── Badge.tsx          # Status indicators (e.g. AI Ready, Processing)
+│   │   ├── Button.tsx         # Primary, secondary, outline & danger buttons
+│   │   ├── Checkbox.tsx       # Custom styled checkbox input
+│   │   ├── ConfirmDialog.tsx  # Deletion and critical action modal
+│   │   ├── EmptyState.tsx     # Zero-data visual placeholders
+│   │   ├── IconButton.tsx     # Accessible icon action buttons
+│   │   ├── Input.tsx          # Text and search input controls
+│   │   ├── Modal.tsx          # Accessible overlay modal wrapper
+│   │   └── Skeleton.tsx       # Shimmer loading placeholders
+│   ├── DocumentAiModal.tsx    # RAG assistant, streaming output & history tab
+│   ├── FileIcon.tsx           # Contextual file extension icons
+│   ├── Layout.tsx             # Navbar, sidebar, and layout shell
+│   └── ShareModal.tsx         # File link generator with expiration options
+├── context/
+│   ├── AuthContext.tsx        # Authentication token and user state
+│   ├── ToastContext.tsx       # Global toast notification provider
+│   ├── useAuth.ts             # Auth hook shortcut
+│   └── useToast.ts            # Toast hook shortcut
+├── pages/
+│   ├── Dashboard.tsx          # File table, upload panel, and RAG trigger
+│   ├── Login.tsx              # User login screen
+│   └── Register.tsx           # User registration screen
+├── services/
+│   ├── api.ts                 # Axios instance with JWT interceptor
+│   └── ai.ts                  # Document AI API service wrapper
+├── utils/
+│   └── formatters.ts          # File size (bytes to MB/GB), dates, string truncate
+├── App.tsx                    # Route definitions and provider composition
+├── main.tsx                   # Application entry point
+└── index.css                  # Global styles, variables, and animations
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 🚀 Getting Started
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### 1. Prerequisites
+- **Node.js 18+** or **20+**
+- **npm** or **pnpm** / **yarn**
+- Running **CloudVault Backend** at `http://localhost:8080`
+
+### 2. Installation
+```bash
+cd cloudvault-frontend
+npm install
 ```
+
+### 3. Run Development Server
+```bash
+npm run dev
+```
+The app will be available at `http://localhost:5173`.
+
+### 4. Build for Production
+```bash
+npm run build
+npm run preview
+```
+
+---
+
+## 🐳 Docker Setup
+
+A multi-stage `Dockerfile` and `compose.yaml` are included for deploying behind Nginx:
+
+```bash
+# Build and run with Docker Compose
+docker compose up -d --build
+```
+
+---
+
+## 👤 Author
+**Mrugesh Patil**
+- Frontend & Full-Stack Developer | Applied AI & Security Enthusiast
